@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "general": {
+    "serverName": "KUPU KUPU MALAM RP"
+  },
+  "server": {
+    "dataPath": "C:/xampp/htdocs/txData/Qbox_91B484.base/"
+  }
+}
