@@ -143,6 +143,10 @@ end)
 CreateThread(function()
     while not LocalPlayer.state.isLoggedIn do Wait(500) end
 
+    if Config.ExternalMechanicIntegration then
+        return
+    end
+
     for _, zone in ipairs(Config.MechanicZones) do
         local evt = zone.menu == 'dyno' and 'renzu_tuners:client:openDyno' or 'renzu_tuners:client:openBench'
 

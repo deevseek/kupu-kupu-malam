@@ -10,6 +10,10 @@ Config.Inventory = {
     prefer = 'ox', -- ox | qb | auto
 }
 
+-- Set true jika target/interaction renzu mau didaftarkan dari qb/qbx-mechanicjob.
+-- Jika true, renzu_tuners tidak akan membuat zone qb-target sendiri.
+Config.ExternalMechanicIntegration = true
+
 Config.Database = {
     table = 'renzu_tuners_qb',
 }
