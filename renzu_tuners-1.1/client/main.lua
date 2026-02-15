@@ -1,196 +1,194 @@
+local QBCore = exports['qb-core']:GetCoreObject()
 
-lib.onCache('vehicle', function(value)
-	if config.sandboxmode then
-		Sandbox(value)
-	else
-		return OnVehicle(value)
-	end
-end)
+local function isMechanic()
+    local data = QBCore.Functions.GetPlayerData()
+    if not data or not data.job then return false end
 
-OnVehicle = function(value)
-	invehicle = value
-	if not DoesEntityExist(value) then return end
-	local isdriver = GetPedInVehicleSeat(value,-1) == cache.ped
-	if not isdriver then return end
-	local plate = string.gsub(GetVehicleNumberPlateText(value), '^%s*(.-)%s*$', '%1'):upper()
-	local state = GetVehicleServerStates(plate)
-	if not DoesEntityExist(value) then return end
-	--local vehiclestats = GlobalState.vehiclestats
-    local coord = GetEntityCoords(value)
-    local lastcoord = nil
-	local ent = value and Entity(value).state
-	local turbo = ent.turbo?.turbo -- renzu_turbo states bag
-	local ecu_state = ecu
-	local turbopower = 1.0
-	local turboinstall = GetResourceState('renzu_turbo') == 'started'
-	if value then
-		DefaultSetting(value)
-		plate = string.gsub(GetVehicleNumberPlateText(value), '^%s*(.-)%s*$', '%1'):upper()
-		LoadVehicleSetup(value,ent,vehiclestats)
-		ent:set('vehicle_loaded', true, true)
-		--print("setup",value ~= 0 , tonumber(value) , ecu , invehicle)
-		--ecu = ecu_state[plate] and ecu_state[plate].active?.boostpergear
-		Citizen.CreateThreadNow(function()
-			local lockspeed = 0
-			local driveforce = GetVehicleHandlingFloat(value,'CHandlingData', 'fInitialDriveForce')
-			local hasracingcam = ent['racing_camshaft']
-			upgrade, stats = GetEngineUpgrades(value) -- get current upgraded parts
-			tune = GetTuningData(plate) -- get current tuned data
-			while invehicle do
-				local sleep = 200
-				local Speed = GetEntitySpeed(value)
-				turbopower = GetVehicleCheatPowerIncrease(value)
-				efficiency = EngineEfficiency(value,stats,tune,turbopower)
-				local gear = GetVehicleCurrentGear(value) + 1
-				if ecu and ecu[gear-1] and not indyno and turboinstall then
-					exports.renzu_turbo:BoostPerGear(ecu[gear-1] or 1.0)
-				end
-				local rpm = GetVehicleCurrentRpm(value)
-				if hasracingcam then
-					if rpm >= 0.61 then -- activate high cam lobe
-						SetVehicleHandlingField(value, 'CHandlingData', 'fInitialDriveForce', driveforce+(1.00/gear))
-					else
-						SetVehicleHandlingField(value, 'CHandlingData', 'fInitialDriveForce', driveforce+0.0)
-					end
-				end
-				Wait(sleep)
-			end
-		end)
-	end
-	Citizen.CreateThreadNow(function()
-		if not config.enableDegration then return end
-		local tune = GetTuningData(plate)
-		local upgraded = {}
-		for k,v in pairs(config.engineupgrades) do -- create a list of upgraded states
-			if ent and ent[v.item] then
-				upgraded[v.state] = true
-			end
-		end
-		--local vehiclestats = GlobalState.vehiclestats
-		local synctimer = 0
-        while invehicle do
-			local ent = ent
-			local sleep = ent.nitroenable and 200 or 3000
-			local rpm = GetVehicleCurrentRpm(value)
-			if rpm > 0.5 then -- start degrading states if its above 0.5 RPM
-				local mileage = ent.mileage or 0
-				local update = false
-				local nitro = ent.nitroenable -- renzu_nitro states bag if nitro is being used
-				local turbodeduct = 1.0
-				local nitrodeduct = 1.0
-				local chance = nitro and 7 or 15
-				if turbo then
-					turbodeduct = turbopower
-				end
-				if nitro then
-					nitrodeduct = turbopower -- fix degration for now when using NOS
-				end
-				local chance_degrade = math.random(1,100) < (chance * ( 2.0 - efficiency))
-				synctimer += 1
-				local resettimer = false
-				for _,v2 in pairs(config.engineparts) do
-					local stock = not upgraded[v2.item]	
-					for k,v in ipairs(config.degrade) do
-						local mileage_degration = mileage >= v.min
-						local candegrade = mileage_degration and chance_degrade -- chances of degration and conditions
-						for k,handlingname in pairs(v2.handling) do
-							if candegrade or (tune[handlingname] or 1.0) > 1.0 and chance_degrade and mileage_degration or turbo and chance_degrade and mileage_degration or nitro and mileage_degration and chance_degrade then
-								local efficiency_degrade = 1.0 + (1.0 - efficiency)
-								local stock_degrade = stock and 1.5 or efficiency_degrade -- if parts are stock degration is higher when using turbos, nitros and ECU over tunes.
-								local upgraded_degrade = stock and 1.0 or (efficiency_degrade * 0.9) -- if parts are upgraded degration is lower compared to stock when using turbos, nitros and ECU over tunes.
-								local degrade = ((((v.degrade * upgraded_degrade) * (turbodeduct * stock_degrade)) * (nitrodeduct * stock_degrade)) * (efficiency_degrade * stock_degrade) * rpm) or 1.0
-								local value = ent[v2.item] and ent[v2.item] - degrade or vehiclestats[plate] and vehiclestats[plate][v2.item] and vehiclestats[plate][v2.item] - degrade or 100 - degrade
-								ent:set(v2.item, value, synctimer > 20) -- set local state bag
-								resettimer = true
-								break
-							end
-						end
-					end
-				end
-				if synctimer > 20 and resettimer then
-					synctimer = 0
-					resettimer = false
-				end
-				HandleEngineDegration(value,ent,plate) -- handle Overall Handling and degration
-			end
-			Wait(sleep)
-			if cache.vehicle ~= value then
-				break
-			end
-		end
-		-- on vehicle out
-		for _,v2 in pairs(config.engineparts) do
-			ent:set(v2.item, ent[v2.item] and ent[v2.item]+0.01, true) -- sync local state bag to server
-		end
-	end)
-	
+    if not Config.AllowedJobs[data.job.name] then
+        return false
+    end
 
-	local coord = GetEntityCoords(value)
-    local lastcoord = nil
-	Citizen.CreateThreadNow(function() -- mileage setter. this is not realistic mileage computation. this only adds +10 for every 4000 tick as default
-		local updatestate = 0
-        while invehicle and  GetPedInVehicleSeat(value,-1) == cache.ped do
-			coord = GetEntityCoords(value)
-			if lastcoord and #(coord - lastcoord) > 10 or lastcoord == nil then
-				local ent = Entity(value).state
-				local plate = string.gsub(GetVehicleNumberPlateText(value), '^%s*(.-)%s*$', '%1'):upper()
-				if ent.mileage then
-					updatestate += 1
-					ent:set('mileage', ent.mileage+1, updatestate > 10)
-					if updatestate > 10 then updatestate = 0 end
-				elseif mileages[plate] then
-					ent:set('mileage', tonumber(mileages[plate]), false)
-					lastcoord = GetEntityCoords(value)
-				else
-					ent:set('mileage', 0, false)
-					lastcoord = GetEntityCoords(value)
-				end
-			end
-			lastcoord = GetEntityCoords(value)
-			Wait(4000) -- if you want faster mileage make this lower, if you want slower mileage, make this higher
-			if cache.vehicle ~= value then
-				break
-			end
-		end
-	end)
+    if Config.RequireOnDuty and not data.job.onduty then
+        return false
+    end
+
+    return true
 end
 
-Citizen.CreateThreadNow(function()
-	if config.enablemarkers then
-		for k,v in pairs(config.points) do
-			SetupUpgradePoints(v,k)
-		end
-	end
+local function notify(msg, typ)
+    QBCore.Functions.Notify(msg, typ or 'primary')
+end
+
+local function getVehicleForMenu()
+    local ped = PlayerPedId()
+    local vehicle = GetVehiclePedIsIn(ped, false)
+
+    if vehicle == 0 then
+        vehicle = QBCore.Functions.GetClosestVehicle(GetEntityCoords(ped))
+        if vehicle == 0 or #(GetEntityCoords(ped) - GetEntityCoords(vehicle)) > 5.0 then
+            return nil
+        end
+    end
+
+    return vehicle
+end
+
+local function applyTuneToVehicle(vehicle, data)
+    if vehicle == 0 or not DoesEntityExist(vehicle) or type(data) ~= 'table' then
+        return
+    end
+
+    local stage = tonumber(data.stage) or 0
+    local ecuTune = tonumber(data.ecu_tune) or 0.0
+    local health = tonumber(data.health) or 1000.0
+
+    SetVehicleModKit(vehicle, 0)
+
+    local maxEngineMod = GetNumVehicleMods(vehicle, 11) - 1
+    if maxEngineMod >= 0 then
+        local target = math.min(maxEngineMod, stage)
+        SetVehicleMod(vehicle, 11, target, false)
+    end
+
+    local powerMult = (Config.StagePowerMultiplier[stage] or 0.0) + (ecuTune * 100.0)
+    SetVehicleEnginePowerMultiplier(vehicle, powerMult)
+    SetVehicleEngineTorqueMultiplier(vehicle, 1.0 + ecuTune)
+
+    if health > 0 then
+        SetVehicleEngineHealth(vehicle, health)
+    end
+end
+
+local function requestAction(action)
+    if not isMechanic() then
+        notify('Only mechanics can use tuner workstations.', 'error')
+        return
+    end
+
+    local veh = getVehicleForMenu()
+    if not veh then
+        notify('No vehicle nearby.', 'error')
+        return
+    end
+
+    local plate = QBCore.Functions.GetPlate(veh)
+    local class = GetVehicleClass(veh)
+    local netId = NetworkGetNetworkIdFromEntity(veh)
+
+    local response = lib.callback.await('renzu_tuners:server:performAction', false, {
+        action = action,
+        plate = plate,
+        class = class,
+        netId = netId,
+    })
+
+    if not response or not response.ok then
+        notify((response and response.msg) or 'Action failed.', 'error')
+        return
+    end
+
+    if action == 'dyno' then
+        local stage = tonumber(response.data.stage) or 0
+        local tune = tonumber(response.data.ecu_tune) or 0.0
+        local hp = math.floor(180 + (stage * 50) + (tune * 400))
+        local tq = math.floor(200 + (stage * 60) + (tune * 450))
+        notify(('Dyno complete | HP: %s | TQ: %s | Cost: $%s'):format(hp, tq, response.price), 'success')
+    else
+        notify(response.msg, 'success')
+    end
+
+    applyTuneToVehicle(veh, response.data)
+
+    if action == 'repair' then
+        SetVehicleFixed(veh)
+        SetVehicleDeformationFixed(veh)
+        SetVehicleEngineHealth(veh, 1000.0)
+        SetVehicleBodyHealth(veh, 1000.0)
+    end
+
+    TriggerServerEvent('renzu_tuners:server:saveVehicleState', plate, netId, GetVehicleEngineHealth(veh))
+end
+
+local function openMainMenu(sourceLabel)
+    if not isMechanic() then
+        notify('Only mechanics can access this workstation.', 'error')
+        return
+    end
+
+    lib.registerContext({
+        id = 'renzu_tuner_main',
+        title = ('Renzu Tuners - %s'):format(sourceLabel or 'Workbench'),
+        options = {
+            { title = 'Vehicle Health Check', description = 'Check and save current vehicle state.', icon = 'stethoscope', onSelect = function() requestAction('check') end },
+            { title = 'Dyno Run', description = 'Run dyno graph and show output numbers.', icon = 'gauge-high', onSelect = function() requestAction('dyno') end },
+            { title = 'ECU Tune', description = 'Apply a standalone ECU tune increment.', icon = 'microchip', onSelect = function() requestAction('ecu_tune') end },
+            { title = 'Install Stage 1', description = 'Uses item: ' .. Config.Items.stages[1], icon = 'wrench', onSelect = function() requestAction('stage_1') end },
+            { title = 'Install Stage 2', description = 'Uses item: ' .. Config.Items.stages[2], icon = 'wrench', onSelect = function() requestAction('stage_2') end },
+            { title = 'Install Stage 3', description = 'Uses item: ' .. Config.Items.stages[3], icon = 'wrench', onSelect = function() requestAction('stage_3') end },
+            { title = 'Repair Engine', description = 'Uses item: ' .. Config.Items.repair, icon = 'toolbox', onSelect = function() requestAction('repair') end },
+        }
+    })
+
+    lib.showContext('renzu_tuner_main')
+end
+
+RegisterNetEvent('renzu_tuners:client:openBench', function()
+    openMainMenu('Tuner Bench')
 end)
 
-Citizen.CreateThreadNow(function()
-	Wait(2000)
-	for k,v in pairs(config.dynopoints) do
-		SetupDynoPoints(v,k)
-	end
+RegisterNetEvent('renzu_tuners:client:openDyno', function()
+    openMainMenu('Dyno Workstation')
 end)
 
-Citizen.CreateThreadNow(function()
-	Wait(1000)
-	if config.enablemarkers then
-		for k,v in pairs(config.repairpoints) do
-			SetupRepairPoints(v,k)
-		end
-	end
+CreateThread(function()
+    while not LocalPlayer.state.isLoggedIn do Wait(500) end
+
+    if Config.ExternalMechanicIntegration then
+        return
+    end
+
+    for _, zone in ipairs(Config.MechanicZones) do
+        local evt = zone.menu == 'dyno' and 'renzu_tuners:client:openDyno' or 'renzu_tuners:client:openBench'
+
+        exports['qb-target']:AddBoxZone(zone.id, zone.coords, zone.size.x, zone.size.y, {
+            name = zone.id,
+            heading = zone.heading,
+            debugPoly = Config.Debug,
+            minZ = zone.coords.z - (zone.size.z / 2),
+            maxZ = zone.coords.z + (zone.size.z / 2),
+        }, {
+            options = {
+                {
+                    event = evt,
+                    icon = zone.icon,
+                    label = zone.label,
+                    canInteract = function()
+                        return isMechanic()
+                    end,
+                }
+            },
+            distance = 2.0,
+        })
+    end
 end)
 
-Citizen.CreateThreadNow(function()
-	Wait(1000)
-	local vehicle = GetVehiclePedIsIn(cache.ped)
-	local isturbostarted = GetResourceState('renzu_turbo') == 'started'
-	if isturbostarted then
-		turboconfig = exports.renzu_turbo:turbos()
-	end
-	if vehicle and GetPedInVehicleSeat(vehicle,-1) == cache.ped then
-		if config.sandboxmode then
-			Sandbox(vehicle)
-		else
-			OnVehicle(vehicle)
-		end
-	end
+local lastPlate
+CreateThread(function()
+    while true do
+        Wait(1500)
+
+        local veh = GetVehiclePedIsIn(PlayerPedId(), false)
+        if veh ~= 0 and GetPedInVehicleSeat(veh, -1) == PlayerPedId() then
+            local plate = QBCore.Functions.GetPlate(veh)
+            if plate and plate ~= lastPlate then
+                local tuneData = lib.callback.await('renzu_tuners:server:getTuneData', false, plate)
+                if tuneData then
+                    applyTuneToVehicle(veh, tuneData)
+                end
+                lastPlate = plate
+            end
+        else
+            lastPlate = nil
+        end
+    end
 end)

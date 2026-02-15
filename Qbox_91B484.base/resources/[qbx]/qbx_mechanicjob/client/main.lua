@@ -7,6 +7,8 @@ VehicleStatus = {}
 local plateZones = {}
 local dutyTargetBoxId = 'dutyTarget'
 local stashTargetBoxId = 'stashTarget'
+local renzuBenchTargetBoxId = 'renzuBenchTarget'
+local renzuDynoTargetBoxId = 'renzuDynoTarget'
 
 -- Exports
 
@@ -165,6 +167,114 @@ local function registerStashTarget()
         })
 
         config.targets[stashTargetBoxId] = {created = true, zone = zone}
+    end
+end
+
+
+local function registerRenzuTargets()
+    local benchCoords = vec3(-338.84, -136.74, 39.01)
+    local dynoCoords = vec3(-362.50, -117.68, 39.08)
+
+    if config.targets[renzuBenchTargetBoxId]?.created and config.targets[renzuDynoTargetBoxId]?.created then
+        return
+    end
+
+    if QBX.PlayerData.job.type ~= 'mechanic' then
+        return
+    end
+
+    if config.useTarget then
+        if not config.targets[renzuBenchTargetBoxId]?.created then
+            renzuBenchTargetBoxId = exports.ox_target:addBoxZone({
+                coords = benchCoords,
+                size = vec3(1.6, 1.2, 1.8),
+                rotation = 70.0,
+                debug = config.debugPoly,
+                options = {{
+                    label = 'Open Tuner Bench',
+                    name = renzuBenchTargetBoxId,
+                    icon = 'fa-solid fa-microchip',
+                    distance = 2.0,
+                    event = 'renzu_tuners:client:openBench',
+                    canInteract = function()
+                        return QBX.PlayerData.job.onduty and QBX.PlayerData.job.type == 'mechanic'
+                    end
+                }},
+            })
+
+            config.targets[renzuBenchTargetBoxId] = {created = true}
+        end
+
+        if not config.targets[renzuDynoTargetBoxId]?.created then
+            renzuDynoTargetBoxId = exports.ox_target:addBoxZone({
+                coords = dynoCoords,
+                size = vec3(1.8, 2.2, 1.8),
+                rotation = 160.0,
+                debug = config.debugPoly,
+                options = {{
+                    label = 'Use Dyno Workstation',
+                    name = renzuDynoTargetBoxId,
+                    icon = 'fa-solid fa-gauge-high',
+                    distance = 2.0,
+                    event = 'renzu_tuners:client:openDyno',
+                    canInteract = function()
+                        return QBX.PlayerData.job.onduty and QBX.PlayerData.job.type == 'mechanic'
+                    end
+                }},
+            })
+
+            config.targets[renzuDynoTargetBoxId] = {created = true}
+        end
+    else
+        if not config.targets[renzuBenchTargetBoxId]?.created then
+            local benchZone = lib.zones.box({
+                coords = benchCoords,
+                size = vec3(1.6, 1.2, 1.8),
+                rotation = 70.0,
+                debug = config.debugPoly,
+                inside = function()
+                    if QBX.PlayerData.job.onduty and QBX.PlayerData.job.type == 'mechanic' and IsControlJustPressed(0, 38) then
+                        TriggerEvent('renzu_tuners:client:openBench')
+                        Wait(500)
+                    end
+                end,
+                onEnter = function()
+                    if QBX.PlayerData.job.onduty and QBX.PlayerData.job.type == 'mechanic' then
+                        lib.showTextUI('[E] Open Tuner Bench', {position = 'left-center'})
+                    end
+                end,
+                onExit = function()
+                    lib.hideTextUI()
+                end,
+            })
+
+            config.targets[renzuBenchTargetBoxId] = {created = true, zone = benchZone}
+        end
+
+        if not config.targets[renzuDynoTargetBoxId]?.created then
+            local dynoZone = lib.zones.box({
+                coords = dynoCoords,
+                size = vec3(1.8, 2.2, 1.8),
+                rotation = 160.0,
+                debug = config.debugPoly,
+                inside = function()
+                    if QBX.PlayerData.job.onduty and QBX.PlayerData.job.type == 'mechanic' and IsControlJustPressed(0, 38) then
+                        TriggerEvent('renzu_tuners:client:openDyno')
+                        Wait(500)
+                    end
+                end,
+                onEnter = function()
+                    if QBX.PlayerData.job.onduty and QBX.PlayerData.job.type == 'mechanic' then
+                        lib.showTextUI('[E] Use Dyno Workstation', {position = 'left-center'})
+                    end
+                end,
+                onExit = function()
+                    lib.hideTextUI()
+                end,
+            })
+
+            config.targets[renzuDynoTargetBoxId] = {created = true, zone = dynoZone}
+        end
     end
 end
 
@@ -481,6 +591,7 @@ AddEventHandler('onResourceStart', function(resource)
     registerGarageZone()
     registerDutyTarget()
     registerStashTarget()
+    registerRenzuTargets()
     setVehiclePlateZones()
     if QBX.PlayerData.job.onduty and QBX.PlayerData.type == 'mechanic' then
         TriggerServerEvent("QBCore:ToggleDuty")
@@ -502,6 +613,7 @@ AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
     registerGarageZone()
     registerDutyTarget()
     registerStashTarget()
+    registerRenzuTargets()
     setVehiclePlateZones()
     if QBX.PlayerData.job.onduty and QBX.PlayerData.type == 'mechanic' then
         TriggerServerEvent("QBCore:ToggleDuty")
@@ -521,6 +633,8 @@ end)
 RegisterNetEvent('QBCore:Client:OnJobUpdate', function()
     deleteTarget(dutyTargetBoxId)
     deleteTarget(stashTargetBoxId)
+    deleteTarget(renzuBenchTargetBoxId)
+    deleteTarget(renzuDynoTargetBoxId)
 
     if QBX.PlayerData.type ~= 'mechanic' then return end
 
@@ -528,17 +642,21 @@ RegisterNetEvent('QBCore:Client:OnJobUpdate', function()
 
     if not QBX.PlayerData.job.onduty then return end
     registerStashTarget()
+    registerRenzuTargets()
 end)
 
 RegisterNetEvent('QBCore:Client:SetDuty', function()
     deleteTarget(dutyTargetBoxId)
     deleteTarget(stashTargetBoxId)
+    deleteTarget(renzuBenchTargetBoxId)
+    deleteTarget(renzuDynoTargetBoxId)
 
     if QBX.PlayerData.type == 'mechanic' then
     registerDutyTarget()
 
     if not QBX.PlayerData.job.onduty then return end
     registerStashTarget()
+    registerRenzuTargets()
     end
 end)
 
